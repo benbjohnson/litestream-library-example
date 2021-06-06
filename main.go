@@ -144,8 +144,12 @@ func replicate(ctx context.Context, dsn, bucket string) (*litestream.DB, error) 
 	lsdb := litestream.NewDB(dsn)
 
 	// Build S3 replica and attach to database.
-	replica := lss3.NewReplica(lsdb, "s3")
-	replica.Bucket = bucket
+	client := lss3.NewReplicaClient()
+	client.Bucket = bucket
+
+	replica := litestream.NewReplica(lsdb, "s3")
+	replica.Client = client
+
 	lsdb.Replicas = append(lsdb.Replicas, replica)
 
 	if err := restore(ctx, replica); err != nil {
@@ -160,7 +164,7 @@ func replicate(ctx context.Context, dsn, bucket string) (*litestream.DB, error) 
 	return lsdb, nil
 }
 
-func restore(ctx context.Context, replica litestream.Replica) (err error) {
+func restore(ctx context.Context, replica *litestream.Replica) (err error) {
 	// Skip restore if local database already exists.
 	if _, err := os.Stat(replica.DB().Path()); err == nil {
 		fmt.Println("local database already exists, skipping restore")
@@ -175,7 +179,7 @@ func restore(ctx context.Context, replica litestream.Replica) (err error) {
 	opt.Logger = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
 
 	// Determine the latest generation to restore from.
-	if opt.Generation, _, err = litestream.CalcReplicaRestoreTarget(ctx, replica, opt); err != nil {
+	if opt.Generation, _, err = replica.CalcRestoreTarget(ctx, opt); err != nil {
 		return err
 	}
 
@@ -187,7 +191,7 @@ func restore(ctx context.Context, replica litestream.Replica) (err error) {
 	}
 
 	fmt.Printf("restoring replica for generation %s\n", opt.Generation)
-	if err := litestream.RestoreReplica(ctx, replica, opt); err != nil {
+	if err := replica.Restore(ctx, opt); err != nil {
 		return err
 	}
 	fmt.Println("restore complete")
